@@ -301,6 +301,8 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
                 settings->setTargetWaterTemp(request->arg("targetWaterTemp").toInt());
             if (request->hasArg("temperatureOffset"))
                 settings->setTemperatureOffset(request->arg("temperatureOffset").toInt());
+            if (request->hasArg("pressureOffset"))
+                settings->setPressureOffset(request->arg("pressureOffset").toFloat());
             if (request->hasArg("pressureScaling"))
                 settings->setPressureScaling(request->arg("pressureScaling").toFloat());
             if (request->hasArg("pid"))
@@ -474,6 +476,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
     doc["apPassword"] = settings.getWifiApPassword();
     doc["mdnsName"] = settings.getMdnsName();
     doc["temperatureOffset"] = String(settings.getTemperatureOffset());
+    doc["pressureOffset"] = String(settings.getPressureOffset());
     doc["pressureScaling"] = String(settings.getPressureScaling());
     doc["boilerFillActive"] = settings.isBoilerFillActive();
     doc["startupFillTime"] = settings.getStartupFillTime() / 1000;

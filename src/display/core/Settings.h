@@ -170,6 +170,7 @@ class Settings {
     void setTargetSteamTemp(int target_steam_temp);
     void setTargetWaterTemp(int target_water_temp);
     void setTemperatureOffset(int temperature_offset);
+    void setPressureOffset(float pressure_offset);
     void setPressureScaling(float pressure_scaling);
     void setTargetGrindVolume(double target_grind_volume);
     void setTargetGrindDuration(int target_duration);

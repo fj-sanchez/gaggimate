@@ -169,6 +169,7 @@ class Controller {
 
     // Event handlers
     void onTempRead(float temperature);
+    void onPressureRead(float pressure);
 
     void handleBrewButton(int brewButtonStatus);
     void handleSteamButton(int steamButtonStatus);
