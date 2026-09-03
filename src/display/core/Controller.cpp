@@ -1048,6 +1048,8 @@ void Controller::deactivateLocked(std::vector<const char *> &events) {
     comms.tare();
     applyConnectionPriority(); // shot ended -> relaxed BLE interval
     if (lastProcess->getType() == MODE_BREW) {
+        if (!static_cast<BrewProcess *>(lastProcess)->isUtility())
+            flushPending = true; // a shot leaves grounds behind, a flush does not
         events.push_back("controller:brew:end");
     } else if (lastProcess->getType() == MODE_GRIND) {
         events.push_back("controller:grind:end");
@@ -1118,7 +1120,10 @@ int Controller::getMode() const { return mode; }
 
 void Controller::setMode(int newMode) {
     Event modeEvent = pluginManager->trigger("controller:mode:change", "value", newMode);
+    const int previousMode = mode;
     mode = modeEvent.getInt("value");
+    if (mode == MODE_BREW && previousMode != MODE_BREW)
+        flushPending = true; // entering brew mode, including wake-up from standby
     steamReady = false;
 
     updateLastAction();
@@ -1194,6 +1199,7 @@ void Controller::onFlush() {
         }
         clearLocked(events);
         startProcessLocked(flush, events);
+        flushPending = false;
         events.push_back("controller:brew:start");
     }
     dispatchEvents(events);
@@ -1253,6 +1259,7 @@ void Controller::handleSteamButton(int steamButtonStatus) {
         deactivate();
         setMode(MODE_BREW);
     }
+    steamSwitchOn = steamButtonStatus;
 }
 
 void Controller::handleWaterButton(int buttonStatus) {
@@ -1281,7 +1288,10 @@ void Controller::handleProfileButton(int buttonStatus, String id) {
         deactivate();
         clear();
     }
-    if (buttonStatus) {
+    if (settings.isMomentaryButtons() && buttonStatus && isActive()) {
+        deactivate();
+        clear();
+    } else if (buttonStatus) {
         if (getMode() != MODE_BREW) {
             setMode(MODE_BREW);
         }
