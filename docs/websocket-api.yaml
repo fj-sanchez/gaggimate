@@ -81,6 +81,19 @@ components:
         fl:
           type: number
           description: Current flow
+        sys:
+          type: object
+          description: Display system state (slow-state frame), mirrors the standby screen label.
+          properties:
+            s:
+              type: string
+              enum: [starting, waiting, ready, updating, autotuning, mismatch, error]
+            m:
+              type: string
+              description: Human-readable message shown on the display, empty when ready
+            c:
+              type: integer
+              description: Controller error code (0 = none)
         warn:
           type: array
           description: Machine warnings, one entry per warning type.

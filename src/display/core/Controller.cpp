@@ -675,6 +675,45 @@ bool Controller::isAutotuning() const { return autotuning; }
 
 bool Controller::isReady() const { return !isUpdating() && !isErrorState() && !isAutotuning(); }
 
+const char *systemStateKey(SystemState state) {
+    static const char *const KEYS[] = {"starting", "waiting", "ready", "updating", "autotuning", "mismatch", "error"};
+    return KEYS[state];
+}
+
+SystemState Controller::getSystemState() const {
+    if (isUpdating())
+        return SYSTEM_UPDATING;
+    if (isAutotuning())
+        return SYSTEM_AUTOTUNING;
+    if (systemInfo.protocolMismatch)
+        return SYSTEM_PROTOCOL_MISMATCH;
+    if (isErrorState())
+        return SYSTEM_ERROR;
+    if (!comms.isConnected())
+        return loaded || waitingForController ? SYSTEM_WAITING_CONTROLLER : SYSTEM_STARTING; // lost vs never had it
+    return SYSTEM_READY;
+}
+
+String Controller::getSystemStateMessage() const {
+    switch (getSystemState()) {
+    case SYSTEM_UPDATING:
+        return "Updating...";
+    case SYSTEM_AUTOTUNING:
+        return "Autotuning...";
+    case SYSTEM_PROTOCOL_MISMATCH:
+        return systemInfo.protocolVersion > gm_proto::PROTOCOL_VERSION ? "Version mismatch, update display"
+                                                                       : "Version mismatch, update controller";
+    case SYSTEM_ERROR:
+        return error == ERROR_CODE_RUNAWAY ? "Temperature error, restart..." : "Unknown error";
+    case SYSTEM_WAITING_CONTROLLER:
+        return "Waiting for controller...";
+    case SYSTEM_STARTING:
+        return "Starting...";
+    default:
+        return "";
+    }
+}
+
 bool Controller::isVolumetricAvailable() const {
 #ifdef NIGHTLY_BUILD
     return isBluetoothScaleHealthy() || systemInfo.capabilities.dimming;

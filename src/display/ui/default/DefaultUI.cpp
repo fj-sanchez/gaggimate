@@ -521,8 +521,7 @@ void DefaultUI::updateSystemStatus() {
     const auto &settings = controller->getSettings();
     systemStatus.bluetooth(controller->getClientController()->isConnected());
     systemStatus.wifi(!apActive && WiFi.status() == WL_CONNECTED);
-    bool error = !initialized || waitingForController || controller->isErrorState() || controller->isUpdating() ||
-                 controller->isAutotuning() || controller->getSystemInfo().protocolMismatch || !controller->isReady();
+    const bool error = controller->getSystemState() != SYSTEM_READY;
     systemStatus.error(error);
     const String errorLabel = error ? getErrorMessage() : "";
     if (stringChanged(systemStatus.error_label(), errorLabel.c_str()))
@@ -733,30 +732,7 @@ void DefaultUI::updateBrewProcess() {
 
 void DefaultUI::updateMenuScreen() {}
 
-String DefaultUI::getErrorMessage() {
-    if (controller->isUpdating()) {
-        return "Updating...";
-    }
-    if (controller->isAutotuning()) {
-        return "Autotuning...";
-    }
-    if (controller->getSystemInfo().protocolMismatch) {
-        return controller->getSystemInfo().protocolVersion > gm_proto::PROTOCOL_VERSION ? "Version mismatch, update display"
-                                                                                        : "Version mismatch, update controller";
-    }
-    if (controller->isErrorState()) {
-        switch (controller->getError()) {
-        case ERROR_CODE_RUNAWAY:
-            return "Temperature error, restart...";
-        default:
-            return "Unknown error";
-        }
-    }
-    if (waitingForController) {
-        return "Waiting for controller...";
-    }
-    return initialized ? "" : "Starting...";
-}
+String DefaultUI::getErrorMessage() { return controller->getSystemStateMessage(); }
 
 void DefaultUI::applyTheme() {
     const ::Settings &settings = controller->getSettings();

@@ -201,6 +201,7 @@ export default class ApiService {
     map('cv', 'currentCoffeeVolume', v => v ?? 0);
     map('up', 'update', v => !!v);
     map('warn', 'warnings', parseWarningStates);
+    map('sys', 'system', v => ({ state: v?.s ?? 'ready', message: v?.m ?? '', code: v?.c ?? 0 }));
     status.activeTargetWeight = (status.process?.a && status.targetWeight) || 0;
     status.timestamp = new Date();
 
@@ -244,6 +245,7 @@ export const machine = signal({
     process: null,
     update: false,
     warnings: [],
+    system: null,
   },
   capabilities: {
     pressure: false,

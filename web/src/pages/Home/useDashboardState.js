@@ -5,6 +5,7 @@ import { ApiServiceContext, machine } from '../../services/ApiService.js';
 
 const status = computed(() => machine.value.status);
 const capabilities = computed(() => machine.value.capabilities);
+const connected = computed(() => machine.value.connected);
 
 export function useDashboardState() {
   const apiService = useContext(ApiServiceContext);
@@ -13,6 +14,13 @@ export function useDashboardState() {
   const s = status.value;
   const caps = capabilities.value;
   const p = s.process;
+
+  // Anything but a ready controller locks the dashboard into standby, exactly like the touch UI.
+  const systemReady = connected.value && (!s.system || s.system.state === 'ready');
+  const systemMessage = !connected.value
+    ? 'Connecting to the machine...'
+    : s.system?.message || (s.system?.state ?? '');
+  const mode = systemReady ? s.mode : 0;
 
   const { data: settings } = useQuery(
     'settings-cache',
@@ -23,8 +31,8 @@ export function useDashboardState() {
   // ── derived ──────────────────────────────────────────────
   const isActive = !!p?.a;
   const isFinished = !!p?.e && !isActive;
-  const isBrewing = s.mode === 1;
-  const isGrinding = s.mode === 4;
+  const isBrewing = mode === 1;
+  const isGrinding = mode === 4;
 
   const isSmartGrindEnabled = settings?.smartGrindActive || false;
   const altRelayFunction = settings?.altRelayFunction ?? 1;
@@ -50,7 +58,10 @@ export function useDashboardState() {
   // ── handlers ─────────────────────────────────────────────
   const send = tp => apiService.send({ tp });
 
-  const changeMode = mode => apiService.send({ tp: 'req:change-mode', mode });
+  const changeMode = newMode => {
+    if (!systemReady) return; // locked in standby until the controller is ready
+    apiService.send({ tp: 'req:change-mode', mode: newMode });
+  };
 
   const activate = () => send(isGrinding ? 'req:grind:activate' : 'req:process:activate');
   const deactivate = () => {
@@ -83,7 +94,9 @@ export function useDashboardState() {
 
   return {
     // raw status
-    mode: s.mode,
+    mode,
+    systemReady,
+    systemMessage,
     currentTemperature: s.currentTemperature,
     targetTemperature: s.targetTemperature,
     currentPressure: s.currentPressure,

@@ -112,6 +112,8 @@ export default function CompactProcessControls() {
     startFlush,
     isFlushing,
     warnings,
+    systemReady,
+    systemMessage,
     raiseTemp,
     lowerTemp,
     raiseTarget,
@@ -123,7 +125,7 @@ export default function CompactProcessControls() {
   const showFlush = isBrewing && !isActive && !isFinished;
   const showWeight = volumetricAvailable && (mode === 1 || mode === 3) && brewTarget;
   const processRunning = (isActive || isFinished) && (isBrewing || isGrinding);
-  const shownWarnings = activeWarnings(warnings);
+  const shownWarnings = mode === 0 ? [] : activeWarnings(warnings);
 
   const handlePrimary = () => {
     if (isActive) deactivate();
@@ -139,7 +141,7 @@ export default function CompactProcessControls() {
   const renderContent = () => {
     if (processRunning && isFinished) return <FinishedView elapsed={fmtElapsed(p?.e)} />;
     if (processRunning) return <ActiveView p={p} grind={isGrinding} />;
-    if (mode === 0) return <InfoView title='Standby' hint='Machine is ready' />;
+    if (mode === 0) return <InfoView title='Standby' hint={systemMessage || 'Machine is ready'} />;
     if (mode === 1)
       return (
         <div className='flex w-full max-w-sm min-w-0 flex-col items-stretch gap-3'>
@@ -205,6 +207,7 @@ export default function CompactProcessControls() {
             active={mode === m.id}
             onClick={() => changeMode(m.id)}
             rotation={m.iconRotation}
+            disabled={!systemReady}
           />
         ))}
       </div>

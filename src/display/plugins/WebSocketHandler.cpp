@@ -209,7 +209,8 @@ void WebSocketHandler::handleWebSocketData(AsyncWebSocket *server, AsyncWebSocke
                 } else if (msgType == "req:lower-brew-target") {
                     controller->lowerBrewTarget();
                 } else if (msgType == "req:change-mode") {
-                    if (doc["mode"].is<uint8_t>()) {
+                    // Locked in standby while the controller is not ready, like the touch UI's wake gate.
+                    if (doc["mode"].is<uint8_t>() && controller->getSystemState() == SYSTEM_READY) {
                         auto mode = doc["mode"].as<uint8_t>();
                         controller->deactivate();
                         controller->clear();
@@ -357,6 +358,11 @@ void WebSocketHandler::publishState(unsigned long now) {
     doc["gt"] = controller->isVolumetricAvailable() && controller->getSettings().isVolumetricTarget() ? 1 : 0;
     doc["gact"] = controller->isGrindActive() ? 1 : 0;
     doc["up"] = updateAvailableProvider ? updateAvailableProvider() : false;
+    // Same text as the display's standby label, so headless users see starting/waiting/error states too.
+    JsonObject sys = doc["sys"].to<JsonObject>();
+    sys["s"] = systemStateKey(controller->getSystemState());
+    sys["m"] = controller->getSystemStateMessage();
+    sys["c"] = controller->getError();
     const bool bleConnected = BLEScales.isConnected();
     doc["bc"] = bleConnected;
     // Scale battery: null when disconnected or the driver reports the UNKNOWN sentinel, so merging clients clear it.

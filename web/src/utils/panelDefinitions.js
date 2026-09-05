@@ -48,6 +48,7 @@ export const PANEL_DEFINITIONS = [
       mode: ds.mode,
       showGrindTab: ds.showGrindTab,
       changeMode: ds.changeMode,
+      locked: !ds.systemReady,
     }),
   },
   {
@@ -118,6 +119,7 @@ export const PANEL_DEFINITIONS = [
       clear: ds.clear,
       startFlush: ds.startFlush,
       warnings: ds.warnings,
+      systemMessage: ds.systemMessage,
       currentTemperature: ds.currentTemperature,
       targetTemperature: ds.targetTemperature,
       changeTarget: ds.changeTarget,

@@ -21,6 +21,18 @@ const IPAddress WIFI_SUBNET_MASK(255, 255, 255, 0); // no need to change: https:
 
 enum class VolumetricMeasurementSource { INACTIVE, FLOW_ESTIMATION, BLUETOOTH };
 
+// What the display's standby label reports; shared with the web UI so headless users see the same thing.
+enum SystemState {
+    SYSTEM_STARTING,
+    SYSTEM_WAITING_CONTROLLER,
+    SYSTEM_READY,
+    SYSTEM_UPDATING,
+    SYSTEM_AUTOTUNING,
+    SYSTEM_PROTOCOL_MISMATCH,
+    SYSTEM_ERROR
+};
+const char *systemStateKey(SystemState state);
+
 class Controller {
   public:
     Controller() = default;
@@ -78,6 +90,8 @@ class Controller {
 #endif
     bool isErrorState() const { return error > 0; }
     int getError() const { return error; }
+    SystemState getSystemState() const;
+    String getSystemStateMessage() const;
 
     // Event callback methods
     void updateLastAction();
