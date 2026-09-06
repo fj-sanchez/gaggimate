@@ -15,6 +15,10 @@ extern const uint8_t x509_crt_imported_bundle_bin_start[] asm("_binary_x509_crt_
 
 bool EspHttpTransport::begin(const std::string &url) {
     end();
+    if (url.compare(0, 8, "https://") != 0) {
+        OTA_LOGE(TAG, "Refusing non-HTTPS URL");
+        return false;
+    }
     _url = url;
     arduino_esp_crt_bundle_set(x509_crt_imported_bundle_bin_start);
     esp_http_client_config_t config = {};
@@ -64,6 +68,10 @@ bool EspHttpTransport::followRedirect() {
         return false;
     }
     esp_http_client_close(_client);
+    if (esp_http_client_get_transport_type(_client) != HTTP_TRANSPORT_OVER_SSL) {
+        OTA_LOGE(TAG, "Refusing redirect to a non-HTTPS URL");
+        return false;
+    }
     return true;
 }
 

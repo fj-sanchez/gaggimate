@@ -84,6 +84,13 @@ void GitHubOTA::update(bool controller, bool display, NimBLEClient *client) {
 
     bool updateExecuted = false;
 
+    // checkForUpdates() stores a server-provided Location; never let a downgraded redirect reach the downloads.
+    if (!_latest_url.startsWith("https://")) {
+        ESP_LOGE(TAG, "Refusing non-HTTPS release URL: %s", _latest_url.c_str());
+        setPhase(PHASE_FAILED);
+        return;
+    }
+
     if (controller && update_required(_latest_version, _controller_version)) {
         ESP_LOGI(TAG, "Controller update is required, running firmware update.");
         setPhase(PHASE_CONTROLLER_FW);
@@ -162,7 +169,7 @@ bool GitHubOTA::flashDisplayFirmware(const String &url) {
             _progress_callback(phase, total > 0 ? static_cast<int>((static_cast<uint64_t>(received) * 100) / total) : 0);
         }
     });
-    if (!downloader.run()) {
+    if (!downloader.run() || downloader.received() == 0) {
         esp_ota_abort(handle);
         return false;
     }

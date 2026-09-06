@@ -3,6 +3,8 @@
 
 #include <unity.h>
 
+#include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -195,7 +197,8 @@ void test_asset_swap_mid_download_yields_new_version() {
     PosixHttpTransport transport(1000);
     TestEnv env;
     Download d;
-    bool swapped = false;
+    std::atomic<bool> swapped{false};
+    std::atomic<bool> relaxOk{false};
     DownloadSink sink;
     sink.write = [&](const uint8_t *data, size_t len) {
         d.data.insert(d.data.end(), data, data + len);
@@ -219,10 +222,12 @@ void test_asset_swap_mid_download_yields_new_version() {
         while (!swapped) {
             std::this_thread::sleep_for(std::chrono::milliseconds(5));
         }
-        control("/control/reset?seed=3");
+        std::string body;
+        relaxOk = httpGet(baseUrl() + "/control/reset?seed=3", body); // no Unity asserts off the main thread
     });
     bool ok = downloader.run();
     relax.join();
+    TEST_ASSERT_TRUE_MESSAGE(relaxOk, "relax control request failed");
     TEST_ASSERT_TRUE(ok);
     d.etag = downloader.etag();
     d.attempts = downloader.attempts();

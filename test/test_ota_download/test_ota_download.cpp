@@ -34,6 +34,7 @@ class FakeTransport : public HttpTransport {
     std::string etag = "\"fake-v1\"";
     int redirectHops = 2;
     bool missingLocation = false;
+    bool noEtag = false;
     std::map<int, FaultSpec> faults; // keyed by attempt number (1-based)
     std::vector<AttemptLog> attempts;
     int begins = 0;
@@ -91,7 +92,7 @@ class FakeTransport : public HttpTransport {
             start = requested;
             partial = true;
         }
-        _etag = etag;
+        _etag = noEtag ? "" : etag;
         _pos = start;
         _end = asset.size();
         status = partial ? 206 : 200;
@@ -408,14 +409,26 @@ void test_missing_location_retries_then_gives_up() {
 
 void test_too_many_redirects_fail_attempt() {
     Rig rig;
-    rig.transport.redirectHops = 5;
+    rig.transport.redirectHops = 6;
     TEST_ASSERT_FALSE(rig.run());
     TEST_ASSERT_EQUAL(8, rig.attempts);
-    rig.transport.redirectHops = 4;
     Rig ok;
-    ok.transport.redirectHops = 4;
+    ok.transport.redirectHops = 5; // exactly maxRedirects follows, then the final open
     TEST_ASSERT_TRUE(ok.run());
+    TEST_ASSERT_EQUAL(6, ok.transport.attempts[0].opens);
     ok.expectAsset();
+}
+
+void test_resume_without_etag_restarts_instead() {
+    Rig rig;
+    rig.transport.noEtag = true;
+    rig.transport.faults[1] = {Fault::DROP_AFTER, 100000};
+    TEST_ASSERT_TRUE(rig.run());
+    TEST_ASSERT_EQUAL(2, rig.attempts);
+    TEST_ASSERT_EQUAL(1, rig.sink.restarts);
+    TEST_ASSERT_EQUAL_STRING("", rig.transport.attempts[1].range.c_str()); // no Range without a validator
+    TEST_ASSERT_EQUAL(200, rig.transport.attempts[1].status);
+    rig.expectAsset();
 }
 
 void test_alloc_failure_returns_false_without_attempts() {
@@ -471,6 +484,7 @@ int main() {
     RUN_TEST(test_sink_write_failure_is_fatal);
     RUN_TEST(test_missing_location_retries_then_gives_up);
     RUN_TEST(test_too_many_redirects_fail_attempt);
+    RUN_TEST(test_resume_without_etag_restarts_instead);
     RUN_TEST(test_alloc_failure_returns_false_without_attempts);
     RUN_TEST(test_many_drops_still_complete);
     RUN_TEST(test_parse_content_range);

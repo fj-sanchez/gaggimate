@@ -59,6 +59,10 @@ ResumableDownloader::Outcome ResumableDownloader::runAttempt(uint8_t *buffer) {
         OTA_LOGE(TAG, "Could not create the HTTP client");
         return Outcome::RETRY;
     }
+    // Without a validator a resumed range could splice bytes of a replaced asset; start over instead.
+    if (_received > 0 && _etag.empty() && !restartFromZero()) {
+        return Outcome::FATAL;
+    }
     if (_received > 0) {
         char range[32];
         snprintf(range, sizeof(range), "bytes=%u-", static_cast<unsigned>(_received));
@@ -79,7 +83,7 @@ ResumableDownloader::Outcome ResumableDownloader::runAttempt(uint8_t *buffer) {
 }
 
 bool ResumableDownloader::openWithRedirects(int &status, int &contentLength) {
-    for (int hop = 0; hop < _policy.maxRedirects; hop++) {
+    for (int hop = 0; hop <= _policy.maxRedirects; hop++) { // maxRedirects follows plus the final open
         if (!_transport.open(status, contentLength)) {
             OTA_LOGE(TAG, "Connection or response header failure");
             return false;

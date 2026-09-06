@@ -53,9 +53,9 @@ function OtaProgressView({ phase, progress }) {
       {!failed && <Spinner size={8} />}
       <span className='text-base-content text-xl font-medium'>{getOtaPhaseText(phase)}</span>
       {failed ? (
-        <span className='text-base-content/70 max-w-md text-center'>
-          The download could not be completed. Check the network connection and start the update
-          again.
+        <span role='alert' className='text-base-content/70 max-w-md text-center'>
+          The update could not be completed and the device kept its current firmware. Check the
+          network connection and start the update again.
         </span>
       ) : (
         <span className='text-base-content text-lg font-medium'>{finished ? 100 : progress}%</span>

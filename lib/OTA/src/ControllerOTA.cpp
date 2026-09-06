@@ -99,7 +99,7 @@ bool ControllerOTA::downloadFile(const String &release_url) {
             progressCallback(total > 0 ? static_cast<int>((static_cast<uint64_t>(received) * 50) / total) : 0);
         }
     });
-    bool ok = downloader.run();
+    bool ok = downloader.run() && downloader.received() > 0;
     file.close();
     if (!ok) {
         LittleFS.remove(CONTROLLER_FIRMWARE_PATH);
