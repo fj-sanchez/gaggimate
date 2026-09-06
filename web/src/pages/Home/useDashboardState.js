@@ -17,9 +17,12 @@ export function useDashboardState() {
 
   // Anything but a ready controller locks the dashboard into standby, exactly like the touch UI.
   const systemReady = connected.value && (!s.system || s.system.state === 'ready');
+  // Only a not-ready state carries a message; ready leaves the default standby text in place.
   const systemMessage = !connected.value
     ? 'Connecting to the machine...'
-    : s.system?.message || (s.system?.state ?? '');
+    : systemReady
+      ? ''
+      : s.system.message || s.system.state;
   const mode = systemReady ? s.mode : 0;
 
   const { data: settings } = useQuery(
