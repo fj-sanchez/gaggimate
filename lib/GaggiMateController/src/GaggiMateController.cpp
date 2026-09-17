@@ -39,7 +39,9 @@ void GaggiMateController::setup() {
         [this]() { thermalRunawayShutdown(); });
     this->heater = new Heater(
         this->thermocouple, _config.heaterPin, [this]() { thermalRunawayShutdown(); },
-        [this](float Kp, float Ki, float Kd, float Kff) { _comms.sendAutotuneResult(Kp, Ki, Kd, Kff); },
+        [this](float Kp, float Ki, float Kd, float Kff, float delay, float processGain, float lag) {
+            _comms.sendAutotuneResult(Kp, Ki, Kd, Kff, delay, processGain, lag);
+        },
         [this]() { _comms.sendError(ERROR_CODE_AUTOTUNE_TIMEOUT); });
     this->valve = new SimpleRelay(_config.valvePin, _config.valveOn);
     this->alt = new SimpleRelay(_config.altPin, _config.altOn);
@@ -193,6 +195,9 @@ void GaggiMateController::setup() {
         // Apply thermal feedforward parameters if available
         this->heater->setFeedforwardScale(Kf);
     });
+    _comms.onThermalModelSettings([this](bool enabled, float delay, float processGain, float lag) {
+        this->heater->configureTemperaturePredictor(enabled, delay, processGain, lag);
+    });
     _comms.onPumpSettings([this](gm::PumpSettings settings) {
         if (_config.capabilites.dimming) {
             auto dimmedPump = static_cast<DimmedPump *>(pump);
@@ -335,6 +340,11 @@ void GaggiMateController::thermalRunawayShutdown() {
 void GaggiMateController::sendSensorData() {
     const float pumpPower = *pump->getPumpPowerPtr();
     const float heaterPower = heater ? heater->getDutyCycle() : 0.0f;
+    const float measuredTemperature = this->thermocouple->read();
+    const float controlTemperature = heater ? heater->getControlTemperature() : measuredTemperature;
+    const float predictorResidual = heater ? heater->getPredictorResidual() : 0.0f;
+    const bool predictorActive = heater && heater->isPredictorActive();
+    const uint8_t predictorFallback = heater ? heater->getPredictorFallbackReason() : 0;
     if (_config.capabilites.pressure) {
         // Flow/volumetric come from the DimmedPump; only cast when this board
         // actually has one (pressure and dimming are configured independently).
@@ -355,11 +365,13 @@ void GaggiMateController::sendSensorData() {
                 batch[n++] = _comms.buildVolumetricMeasurement(dimmedPump->getCoffeeVolume());
             }
         }
-        batch[n++] = _comms.buildSensorData(this->thermocouple->read(), this->pressureSensor->getPressure(), puckFlow, pumpFlow,
+        batch[n++] = _comms.buildSensorData(measuredTemperature, controlTemperature, predictorResidual, predictorActive,
+                                            predictorFallback, this->pressureSensor->getPressure(), puckFlow, pumpFlow,
                                             puckResistance, pumpPower, heaterPower, waterPumped);
         _comms.sendUnreliableBatch(batch, n); // telemetry: fire-and-forget
     } else {
-        _comms.sendSensorData(this->thermocouple->read(), 0.0f, 0.0f, 0.0f, 0.0f, pumpPower, heaterPower);
+        _comms.sendSensorData(measuredTemperature, controlTemperature, predictorResidual, predictorActive, predictorFallback,
+                              0.0f, 0.0f, 0.0f, 0.0f, pumpPower, heaterPower);
     }
 }
 
