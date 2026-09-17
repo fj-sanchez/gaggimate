@@ -311,6 +311,13 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
                 settings->setPressureScaling(request->arg("pressureScaling").toFloat());
             if (request->hasArg("pid"))
                 settings->setPid(request->arg("pid"));
+            if (request->hasArg("thermalModelDelay") && request->hasArg("thermalModelGain") &&
+                request->hasArg("thermalModelLag")) {
+                settings->setThermalModel(request->arg("thermalModelDelay").toFloat(),
+                                          request->arg("thermalModelGain").toFloat(),
+                                          request->arg("thermalModelLag").toFloat());
+            }
+            settings->setTemperaturePredictorEnabled(request->hasArg("temperaturePredictorEnabled"));
             if (request->hasArg("pumpModelCoeffs"))
                 settings->setPumpModelCoeffs(request->arg("pumpModelCoeffs"));
             if (request->hasArg("pumpSlipCoeffs"))
@@ -459,6 +466,8 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
         });
         pluginManager->trigger("settings:changed");
         controller->setTargetTemp(controller->getTargetTemp());
+        controller->setPidSettings();
+        controller->setThermalModelSettings();
         controller->setPumpModelCoeffs();
     }
 
@@ -477,6 +486,10 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
     doc["haPort"] = settings.getHomeAssistantPort();
     doc["haTopic"] = settings.getHomeAssistantTopic();
     doc["pid"] = settings.getPid();
+    doc["temperaturePredictorEnabled"] = settings.isTemperaturePredictorEnabled();
+    doc["thermalModelDelay"] = settings.getThermalModelDelay();
+    doc["thermalModelGain"] = settings.getThermalModelGain();
+    doc["thermalModelLag"] = settings.getThermalModelLag();
     doc["pumpModelCoeffs"] = settings.getPumpModelCoeffs();
     doc["pumpSlipCoeffs"] = settings.getPumpSlipCoeffs();
     doc["wifiSsid"] = settings.getWifiSsid();

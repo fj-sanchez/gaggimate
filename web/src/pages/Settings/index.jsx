@@ -126,6 +126,7 @@ function buildSubmitFormData(formData, autowakeupSchedules, restart) {
     'clock24hFormat',
     'autowakeupEnabled',
     'smartGrindToggle',
+    'temperaturePredictorEnabled',
   ];
 
   for (const [key, value] of Object.entries(formData)) {
@@ -179,7 +180,7 @@ export function Settings() {
   const apiService = useContext(ApiServiceContext);
   const { params } = useRoute();
   const tab = params.tab || 'general';
-  const isFormTab = ['general', 'machine', 'plugins'].includes(tab);
+  const isFormTab = ['general', 'machine', 'calibration', 'plugins'].includes(tab);
 
   const [profiles, setProfiles] = useState([]);
   const [submitting, setSubmitting] = useState(false);
@@ -266,6 +267,7 @@ export function Settings() {
           'delayAdjust',
           'clock24hFormat',
           'autowakeupEnabled',
+          'temperaturePredictorEnabled',
         ].includes(key)
       ) {
         value = !formData[key];
@@ -481,6 +483,9 @@ export function Settings() {
           ) : (
             <LazyMachineTab formData={formData} onChange={onChange} setField={setField} />
           ))}
+        {tab === 'calibration' && (
+          <LazyCalibrationTab formData={formData} onChange={onChange} setField={setField} />
+        )}
         {tab === 'plugins' &&
           (isLoading ? (
             <PluginsTabSkeleton />
@@ -501,7 +506,6 @@ export function Settings() {
         )}
       </form>
 
-      {tab === 'calibration' && <LazyCalibrationTab formData={formData} onChange={onChange} />}
       {tab === 'bluetooth' && (isLoading ? <BluetoothTabSkeleton /> : <LazyBluetoothTab />)}
       {tab === 'system' && (isLoading ? <SystemTabSkeleton /> : <LazySystemTab />)}
     </PageLayout>
