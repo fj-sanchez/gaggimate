@@ -39,6 +39,16 @@ void BleServerTransport::init(const String &deviceName, bool pairingWindow) {
     _otaDfu.configure_OTA(_server);
     _otaDfu.start_OTA();
 
+    _txQueue = xQueueCreate(TX_QUEUE_DEPTH, sizeof(TxPacket));
+    if (_txQueue == nullptr ||
+        xTaskCreate(txTaskFn, "GmBleTx", 3072, this, 1, &_txTask) != pdPASS) {
+        ESP_LOGE(LOG_TAG, "Failed to create BLE transmit task");
+        if (_txQueue != nullptr) {
+            vQueueDelete(_txQueue);
+            _txQueue = nullptr;
+        }
+    }
+
     _deviceName = deviceName;
     _advertising = NimBLEDevice::getAdvertising();
     _advertising->setScanResponse(true);
@@ -215,14 +225,29 @@ void BleServerTransport::setInfo(const String &info) {
 }
 
 bool BleServerTransport::send(const uint8_t *data, size_t length) {
-    if (!_connected || _txChar == nullptr)
+    if (!_connected || _txChar == nullptr || _txQueue == nullptr || data == nullptr || length > TX_BUFFER_SIZE)
         return false;
-    _txChar->setValue(data, length);
-    _txChar->notify(); // NimBLE-Arduino 1.4.0: notify() returns void
-    return true;
+    TxPacket packet;
+    packet.length = static_cast<uint16_t>(length);
+    memcpy(packet.data, data, length);
+    return xQueueSend(_txQueue, &packet, 0) == pdTRUE;
 }
 
 bool BleServerTransport::isConnected() const { return _connected; }
+
+void BleServerTransport::txTaskFn(void *arg) { static_cast<BleServerTransport *>(arg)->txTaskLoop(); }
+
+void BleServerTransport::txTaskLoop() {
+    TxPacket packet;
+    for (;;) {
+        if (xQueueReceive(_txQueue, &packet, portMAX_DELAY) != pdTRUE)
+            continue;
+        if (_connected && _txChar != nullptr) {
+            _txChar->setValue(packet.data, packet.length);
+            _txChar->notify();
+        }
+    }
+}
 
 void BleServerTransport::onConnect(NimBLEServer *server) {
     _connected = true;
@@ -255,6 +280,8 @@ void BleServerTransport::onAuthenticationComplete(ble_gap_conn_desc *desc) {
 void BleServerTransport::onDisconnect(NimBLEServer *server) {
     _connected = false;
     _connHandle = BLE_HS_CONN_HANDLE_NONE;
+    if (_txQueue != nullptr)
+        xQueueReset(_txQueue);
     ESP_LOGI(LOG_TAG, "Client disconnected");
     emitConnection(false);
     startAdv();
