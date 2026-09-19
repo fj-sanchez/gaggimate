@@ -513,8 +513,8 @@ void Controller::loop() {
     }
 
     if (initialized) {
-        comms.loop(); // drive the comms send pump + retransmit
         updateConnectionPriority();
+        comms.loop(); // drive the comms send pump + retransmit
     }
 
     unsigned long now = millis();
@@ -711,6 +711,7 @@ void Controller::startProcess(Process *process) {
         std::lock_guard<std::recursive_mutex> guard(processMutex);
         startProcessLocked(process, events);
     }
+    updateConnectionPriority();
     dispatchEvents(events);
 }
 
