@@ -1,6 +1,7 @@
 #include "Settings.h"
 
 #include <algorithm>
+#include <cmath>
 #include <display/util/ColorConversion.h>
 #include <utility>
 
@@ -97,6 +98,8 @@ void Settings::setTargetWaterTemp(const int target_water_temp) { targetWaterTemp
 
 void Settings::setTemperatureOffset(const int temperature_offset) { temperatureOffset.set(temperature_offset); }
 
+void Settings::setPressureOffset(const float pressure_offset) { pressureOffset.set(pressure_offset); }
+
 void Settings::setPressureScaling(const float pressure_scaling) { pressureScaling.set(pressure_scaling); }
 
 void Settings::setTargetGrindVolume(double target_grind_volume) { targetGrindVolume.set(target_grind_volume); }
@@ -114,6 +117,29 @@ void Settings::setStartupMode(const int startup_mode) { startupMode.set(startup_
 void Settings::setStandbyTimeout(int standby_timeout) { standbyTimeout.set(standby_timeout); }
 
 void Settings::setPid(const String &pid) { this->pid.set(pid); }
+
+void Settings::setTemperaturePredictorEnabled(bool enabled) {
+    const float delay = thermalModelDelay.get();
+    const float gain = thermalModelGain.get();
+    const float lag = thermalModelLag.get();
+    const bool modelValid = std::isfinite(delay) && delay >= 0.25f && delay <= 240.0f && std::isfinite(gain) &&
+                            gain >= 0.0001f && gain <= 5.0f && std::isfinite(lag) && lag >= 0.05f && lag <= 240.0f;
+    temperaturePredictorEnabled.set(enabled && modelValid);
+}
+
+void Settings::setThermalModel(float delay, float gain, float lag) {
+    if (!std::isfinite(delay) || !std::isfinite(gain) || !std::isfinite(lag) || delay < 0.25f || gain < 0.0001f ||
+        lag < 0.05f || delay > 240.0f || gain > 5.0f || lag > 240.0f) {
+        thermalModelDelay.set(0.0f);
+        thermalModelGain.set(0.0f);
+        thermalModelLag.set(0.0f);
+        temperaturePredictorEnabled.set(false);
+        return;
+    }
+    thermalModelDelay.set(delay);
+    thermalModelGain.set(gain);
+    thermalModelLag.set(lag);
+}
 
 void Settings::setPumpModelCoeffs(const String &pumpModelCoeffs) { this->pumpModelCoeffs.set(pumpModelCoeffs); }
 
@@ -162,6 +188,25 @@ void Settings::setHomeAssistantPassword(const String &homeAssistantPassword) {
 }
 
 void Settings::setMomentaryButtons(bool momentary_buttons) { momentaryButtons.set(momentary_buttons); }
+
+void Settings::setFlushDuration(int seconds) { flushDuration.set(std::clamp(seconds, 0, MAX_FLUSH_DURATION_S)); }
+
+// Clamp to the WarningLevel range so a bad web value can't leave a warning in an undefined state.
+static int clampWarningLevel(int level) {
+    return level < WARNING_LEVEL_IGNORE ? WARNING_LEVEL_IGNORE : (level > WARNING_LEVEL_ERROR ? WARNING_LEVEL_ERROR : level);
+}
+
+void Settings::setWarnWaterLevel(int level) { warnWaterLevel.set(clampWarningLevel(level)); }
+
+void Settings::setWarnFlush(int level) { warnFlush.set(clampWarningLevel(level)); }
+
+void Settings::setWarnSteamSwitch(int level) { warnSteamSwitch.set(clampWarningLevel(level)); }
+
+void Settings::setWarnScaleConnected(int level) { warnScaleConnected.set(clampWarningLevel(level)); }
+
+void Settings::setWarnScaleBattery(int level) { warnScaleBattery.set(clampWarningLevel(level)); }
+
+void Settings::setWarnTemperature(int level) { warnTemperature.set(clampWarningLevel(level)); }
 
 void Settings::setTimezone(String timezone) { this->timezone.set(timezone); }
 
@@ -243,6 +288,10 @@ void Settings::setEmptyTankDistance(int empty_tank_distance) { emptyTankDistance
 void Settings::setFullTankDistance(int full_tank_distance) { fullTankDistance.set(full_tank_distance); }
 
 void Settings::setAltRelayFunction(int alt_relay_function) { altRelayFunction.set(alt_relay_function); }
+
+void Settings::setDumpValveDuration(float dump_valve_duration) {
+    dumpValveDuration.set(std::clamp(dump_valve_duration, 0.0f, MAX_DUMP_VALVE_DURATION_S));
+}
 
 void Settings::setAutoWakeupEnabled(bool enabled) { autowakeupEnabled.set(enabled); }
 

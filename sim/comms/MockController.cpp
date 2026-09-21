@@ -24,6 +24,7 @@ void MockController::setPump(const PumpCommand &c) {
 void MockController::setRelay(const RelayCommand &c) {
     if (c.index == 0)
         brewValveOpen = c.open;
+    // index 1 = alt/dump relay; the Classic-style mock dumps to tray, not the scale.
 }
 
 void MockController::update() {
@@ -69,7 +70,7 @@ void MockController::update() {
         lastSensorMs = now;
         const float puckResistance = flow > 0.05f ? pressure / flow : 0.0f;
         if (onSensor)
-            onSensor(temperature, pressure, flow, flow, puckResistance, pumpPower, constrain(gain * 100.0, 0.0f, 100.0f));
+            onSensor(temperature, pressure, flow, flow, puckResistance, pumpPower, constrain(gain * 100.0, 0.0f, 100.0f), 0.0f);
         if (onVolumetric)
             onVolumetric(weight);
     }

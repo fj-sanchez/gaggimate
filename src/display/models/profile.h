@@ -25,6 +25,7 @@ enum class PhaseExitReason : uint8_t {
     DURATION = 5,          // phase duration elapsed
     SAFETY = 6,            // brew safety timeout (set by BrewProcess, not Phase::isFinished)
     ABORTED = 7,           // shot manually stopped before the process finished
+    HOLD_RELEASED = 8,     // held phase ended because the button was released (hold-to-flush)
 };
 
 struct Target {
@@ -57,6 +58,7 @@ struct Phase {
     String name;
     PhaseType phase; // "preinfusion" | "brew"
     int valve;       // 0 or 1
+    int alt = 0;     // 0 or 1; dump / alt relay, ignored unless SSR2 function is Dump valve
     float duration;
     bool pumpIsSimple;
     int pumpSimple; // Used if pumpIsSimple == true
@@ -285,6 +287,7 @@ inline bool parseProfile(const JsonObject &obj, Profile &profile) {
         phase.name = p["name"].as<String>();
         phase.phase = p["phase"].as<String>() == "preinfusion" ? PhaseType::PHASE_TYPE_PREINFUSION : PhaseType::PHASE_TYPE_BREW;
         phase.valve = p["valve"].as<int>();
+        phase.alt = p["alt"] | 0;
         phase.duration = p["duration"].as<float>();
         if (p["temperature"].is<float>()) {
             phase.temperature = p["temperature"].as<float>();
@@ -392,6 +395,7 @@ inline void writeProfile(JsonObject &obj, const Profile &profile) {
         p["name"] = phase.name;
         p["phase"] = phase.phase == PhaseType::PHASE_TYPE_PREINFUSION ? "preinfusion" : "brew";
         p["valve"] = phase.valve;
+        p["alt"] = phase.alt;
         p["duration"] = phase.duration;
         p["temperature"] = phase.temperature;
         auto transition = p["transition"].to<JsonObject>();

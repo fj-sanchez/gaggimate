@@ -11,6 +11,9 @@
 
 #define PREFERENCES_KEY "controller"
 
+// Per-warning severity: hidden, shown as a warning, or shown as an error that needs confirmation before brewing.
+enum WarningLevel { WARNING_LEVEL_IGNORE = 0, WARNING_LEVEL_WARN = 1, WARNING_LEVEL_ERROR = 2 };
+
 struct AutoWakeupSchedule {
     String time;    // HH:MM format
     bool days[7]{}; // [Mon, Tue, Wed, Thu, Fri, Sat, Sun]
@@ -74,6 +77,7 @@ class Settings {
     int getTargetSteamTemp() const { return targetSteamTemp.get(); }
     int getTargetWaterTemp() const { return targetWaterTemp.get(); }
     int getTemperatureOffset() const { return temperatureOffset.get(); }
+    float getPressureOffset() const { return pressureOffset.get(); }
     float getPressureScaling() const { return pressureScaling.get(); }
     double getTargetGrindVolume() const { return targetGrindVolume.get(); }
     int getTargetGrindDuration() const { return targetGrindDuration.get(); }
@@ -83,6 +87,10 @@ class Settings {
     double getGrindDelay() const { return grindDelay.get(); }
     bool isDelayAdjust() const { return delayAdjust.get(); }
     String getPid() const { return pid.get(); }
+    bool isTemperaturePredictorEnabled() const { return temperaturePredictorEnabled.get(); }
+    float getThermalModelDelay() const { return thermalModelDelay.get(); }
+    float getThermalModelGain() const { return thermalModelGain.get(); }
+    float getThermalModelLag() const { return thermalModelLag.get(); }
     String getPumpModelCoeffs() const { return pumpModelCoeffs.get(); }
     String getPumpSlipCoeffs() const { return pumpSlipCoeffs.get(); }
     String getWifiSsid() const { return wifiSsid.get(); }
@@ -106,6 +114,7 @@ class Settings {
     int getHomeAssistantPort() const { return homeAssistantPort.get(); }
     String getHomeAssistantTopic() const { return homeAssistantTopic.get(); }
     bool isMomentaryButtons() const { return momentaryButtons.get(); }
+    int getFlushDuration() const { return flushDuration.get(); } // seconds, 0 = as long as the button is held
     String getTimezone() const { return timezone.get(); }
     bool isClock24hFormat() const { return clock24hFormat.get(); }
     String getSelectedProfile() const { return selectedProfile.get(); }
@@ -115,6 +124,12 @@ class Settings {
     int getMainBrightness() const { return mainBrightness.get(); }
     int getStandbyBrightness() const { return standbyBrightness.get(); }
     int getStandbyBrightnessTimeout() const { return standbyBrightnessTimeout.get(); }
+    int getWarnWaterLevel() const { return warnWaterLevel.get(); }
+    int getWarnFlush() const { return warnFlush.get(); }
+    int getWarnSteamSwitch() const { return warnSteamSwitch.get(); }
+    int getWarnScaleConnected() const { return warnScaleConnected.get(); }
+    int getWarnScaleBattery() const { return warnScaleBattery.get(); }
+    int getWarnTemperature() const { return warnTemperature.get(); }
     int getWifiApTimeout() const { return wifiApTimeout.get(); }
     float getSteamPumpPercentage() const { return steamPumpPercentage.get(); }
     float getSteamPumpCutoff() const { return steamPumpCutoff.get(); }
@@ -145,6 +160,7 @@ class Settings {
     int getEmptyTankDistance() const { return emptyTankDistance.get(); }
     int getFullTankDistance() const { return fullTankDistance.get(); }
     int getAltRelayFunction() const { return altRelayFunction.get(); }
+    float getDumpValveDuration() const { return dumpValveDuration.get(); }
     bool isAutoWakeupEnabled() const { return autowakeupEnabled.get(); }
     std::vector<AutoWakeupSchedule> getAutoWakeupSchedules() const { return autowakeupSchedules.get(); }
     String getButtonBehavior(int index) const {
@@ -161,6 +177,7 @@ class Settings {
     void setTargetSteamTemp(int target_steam_temp);
     void setTargetWaterTemp(int target_water_temp);
     void setTemperatureOffset(int temperature_offset);
+    void setPressureOffset(float pressure_offset);
     void setPressureScaling(float pressure_scaling);
     void setTargetGrindVolume(double target_grind_volume);
     void setTargetGrindDuration(int target_duration);
@@ -170,6 +187,8 @@ class Settings {
     void setGrindDelay(double grindDelay);
     void setDelayAdjust(bool delay_adjust);
     void setPid(const String &pid);
+    void setTemperaturePredictorEnabled(bool enabled);
+    void setThermalModel(float delay, float gain, float lag);
     void setPumpModelCoeffs(const String &pumpModelCoeffs);
     void setPumpSlipCoeffs(const String &pumpSlipCoeffs);
     void setWifiSsid(const String &wifiSsid);
@@ -193,6 +212,13 @@ class Settings {
     void setHomeAssistantPort(int homeAssistantPort);
     void setHomeAssistantTopic(const String &homeAssistantTopic);
     void setMomentaryButtons(bool momentary_buttons);
+    void setFlushDuration(int seconds);
+    void setWarnWaterLevel(int level);
+    void setWarnFlush(int level);
+    void setWarnSteamSwitch(int level);
+    void setWarnScaleConnected(int level);
+    void setWarnScaleBattery(int level);
+    void setWarnTemperature(int level);
     void setTimezone(String timezone);
     void setClockFormat(bool format_24h);
     void setSelectedProfile(String selected_profile);
@@ -225,6 +251,7 @@ class Settings {
     void setEmptyTankDistance(int empty_tank_distance);
     void setFullTankDistance(int full_tank_distance);
     void setAltRelayFunction(int alt_relay_function);
+    void setDumpValveDuration(float dump_valve_duration);
     void setAutoWakeupEnabled(bool enabled);
     void setAutoWakeupSchedules(const std::vector<AutoWakeupSchedule> &schedules);
     void setButtonBehavior(int index, String behavior);
@@ -244,6 +271,7 @@ class Settings {
     Property<int> targetSteamTemp{registry, "ts", 145};
     Property<int> targetWaterTemp{registry, "tw", 80};
     Property<int> temperatureOffset{registry, "to", DEFAULT_TEMPERATURE_OFFSET};
+    Property<float> pressureOffset{registry, "poff", DEFAULT_PRESSURE_OFFSET};
     Property<float> pressureScaling{registry, "ps", DEFAULT_PRESSURE_SCALING};
     Property<double> targetGrindVolume{registry, "tgv", 18.0};
     Property<int> targetGrindDuration{registry, "tgd", 25000};
@@ -255,6 +283,10 @@ class Settings {
     Property<std::vector<AutoWakeupSchedule>> autowakeupSchedules{registry, "ab_schedules", {AutoWakeupSchedule("07:00")}};
     Property<int> standbyTimeout{registry, "sbt", DEFAULT_STANDBY_TIMEOUT_MS};
     Property<String> pid{registry, "pid", DEFAULT_PID};
+    Property<bool> temperaturePredictorEnabled{registry, "tp_en", false};
+    Property<float> thermalModelDelay{registry, "tm_d", 0.0f};
+    Property<float> thermalModelGain{registry, "tm_g", 0.0f};
+    Property<float> thermalModelLag{registry, "tm_l", 0.0f};
     Property<String> wifiSsid{registry, "ws", ""};
     Property<String> wifiPassword{registry, "wp", ""};
     Property<String> wifiApPassword{registry, "wap", ""}; // empty until generated on first start
@@ -276,6 +308,7 @@ class Settings {
     Property<int> homeAssistantPort{registry, "ha_p", 1883};
     Property<String> homeAssistantTopic{registry, "ha_t", DEFAULT_HOME_ASSISTANT_TOPIC};
     Property<bool> momentaryButtons{registry, "mb", false};
+    Property<int> flushDuration{registry, "fl_dur", DEFAULT_FLUSH_DURATION_S};
     Property<String> timezone{registry, "tz", DEFAULT_TIMEZONE};
     Property<bool> clock24hFormat{registry, "clk_24h", true};
     Property<String> otaChannel{registry, "oc", DEFAULT_OTA_CHANNEL};
@@ -292,6 +325,14 @@ class Settings {
     Property<int> wifiApTimeout{registry, "wifi_apt", DEFAULT_WIFI_AP_TIMEOUT_MS};
     Property<int> themeMode{registry, "theme", 0};
 
+    // Warning levels (WarningLevel)
+    Property<int> warnWaterLevel{registry, "wl_water", WARNING_LEVEL_WARN};
+    Property<int> warnFlush{registry, "wl_flush", WARNING_LEVEL_WARN};
+    Property<int> warnSteamSwitch{registry, "wl_switch", WARNING_LEVEL_WARN};
+    Property<int> warnScaleConnected{registry, "wl_scale", WARNING_LEVEL_WARN};
+    Property<int> warnScaleBattery{registry, "wl_scale_bat", WARNING_LEVEL_ERROR};
+    Property<int> warnTemperature{registry, "wl_temp", WARNING_LEVEL_WARN};
+
     // Sunrise settings (r/g/b/w are legacy load-only values that seed the idle color default)
     int sunriseR = 0;
     int sunriseG = 250;
@@ -306,6 +347,7 @@ class Settings {
     Property<int> fullTankDistance{registry, "sr_fd", 30};
 
     Property<int> altRelayFunction{registry, "alt_relay", ALT_RELAY_GRIND}; // Default to grind
+    Property<float> dumpValveDuration{registry, "dv_dur", DEFAULT_DUMP_VALVE_DURATION_S};
     Property<std::vector<String>> buttonBehavior{registry, "btnb", {"brew", "steam", "water"}};
 
     // Pump settings

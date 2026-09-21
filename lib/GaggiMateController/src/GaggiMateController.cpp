@@ -19,6 +19,16 @@ GaggiMateController::GaggiMateController(String version) : _version(std::move(ve
 char albaSwTxBuffer[128];
 char albaSwRxBuffer[128];
 
+bool GaggiMateController::isSteamSwitchOn() const {
+    pinMode(_config.steamButtonPin, INPUT_PULLUP);
+    for (int i = 0; i < 5; i++) { // active low; require a steady reading so a bouncing contact never opens the window
+        if (digitalRead(_config.steamButtonPin) != LOW)
+            return false;
+        delay(10);
+    }
+    return true;
+}
+
 void GaggiMateController::setup() {
     delay(5000);
     detectBoard();
@@ -29,7 +39,9 @@ void GaggiMateController::setup() {
         [this]() { thermalRunawayShutdown(); });
     this->heater = new Heater(
         this->thermocouple, _config.heaterPin, [this]() { thermalRunawayShutdown(); },
-        [this](float Kp, float Ki, float Kd, float Kff) { _comms.sendAutotuneResult(Kp, Ki, Kd, Kff); },
+        [this](float Kp, float Ki, float Kd, float Kff, float delay, float processGain, float lag) {
+            _comms.sendAutotuneResult(Kp, Ki, Kd, Kff, delay, processGain, lag);
+        },
         [this]() { _comms.sendError(ERROR_CODE_AUTOTUNE_TIMEOUT); });
     this->valve = new SimpleRelay(_config.valvePin, _config.valveOn);
     this->alt = new SimpleRelay(_config.altPin, _config.altOn);
@@ -70,7 +82,8 @@ void GaggiMateController::setup() {
         capabilities.addons[0] = gaggimate_Addon_init_zero;
         capabilities.addons[0].type = 7;
     }
-    _comms.init("GPBLS", _config.name.c_str(), _version, capabilities);
+    // Steam switch held at power-on opens the BLE pairing window; read it here since steamBtn->setup() runs later.
+    _comms.init("GPBLS", _config.name.c_str(), _version, capabilities, isSteamSwitchOn());
 
     if (_config.capabilites.ledControls) {
         this->ledController->setup();
@@ -181,6 +194,9 @@ void GaggiMateController::setup() {
 
         // Apply thermal feedforward parameters if available
         this->heater->setFeedforwardScale(Kf);
+    });
+    _comms.onThermalModelSettings([this](bool enabled, float delay, float processGain, float lag) {
+        this->heater->configureTemperaturePredictor(enabled, delay, processGain, lag);
     });
     _comms.onPumpSettings([this](gm::PumpSettings settings) {
         if (_config.capabilites.dimming) {
@@ -324,12 +340,18 @@ void GaggiMateController::thermalRunawayShutdown() {
 void GaggiMateController::sendSensorData() {
     const float pumpPower = *pump->getPumpPowerPtr();
     const float heaterPower = heater ? heater->getDutyCycle() : 0.0f;
+    const float measuredTemperature = this->thermocouple->read();
+    const float controlTemperature = heater ? heater->getControlTemperature() : measuredTemperature;
+    const float predictorResidual = heater ? heater->getPredictorResidual() : 0.0f;
+    const bool predictorActive = heater && heater->isPredictorActive();
+    const uint8_t predictorFallback = heater ? heater->getPredictorFallbackReason() : 0;
     if (_config.capabilites.pressure) {
         // Flow/volumetric come from the DimmedPump; only cast when this board
         // actually has one (pressure and dimming are configured independently).
         float puckFlow = 0.0f;
         float pumpFlow = 0.0f;
         float puckResistance = 0.0f;
+        float waterPumped = 0.0f;
         // Sensor + (optional) volumetric ride in one frame.
         gm::Payload batch[2];
         size_t n = 0;
@@ -338,15 +360,18 @@ void GaggiMateController::sendSensorData() {
             puckFlow = dimmedPump->getPuckFlow();
             pumpFlow = dimmedPump->getPumpFlow();
             puckResistance = dimmedPump->getPuckResistance();
+            waterPumped = dimmedPump->getPumpedWater();
             if (this->valve->getState()) {
                 batch[n++] = _comms.buildVolumetricMeasurement(dimmedPump->getCoffeeVolume());
             }
         }
-        batch[n++] = _comms.buildSensorData(this->thermocouple->read(), this->pressureSensor->getPressure(), puckFlow, pumpFlow,
-                                            puckResistance, pumpPower, heaterPower);
+        batch[n++] = _comms.buildSensorData(measuredTemperature, controlTemperature, predictorResidual, predictorActive,
+                                            predictorFallback, this->pressureSensor->getPressure(), puckFlow, pumpFlow,
+                                            puckResistance, pumpPower, heaterPower, waterPumped);
         _comms.sendUnreliableBatch(batch, n); // telemetry: fire-and-forget
     } else {
-        _comms.sendSensorData(this->thermocouple->read(), 0.0f, 0.0f, 0.0f, 0.0f, pumpPower, heaterPower);
+        _comms.sendSensorData(measuredTemperature, controlTemperature, predictorResidual, predictorActive, predictorFallback,
+                              0.0f, 0.0f, 0.0f, 0.0f, pumpPower, heaterPower);
     }
 }
 

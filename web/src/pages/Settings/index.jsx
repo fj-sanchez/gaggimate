@@ -126,6 +126,7 @@ function buildSubmitFormData(formData, autowakeupSchedules, restart) {
     'clock24hFormat',
     'autowakeupEnabled',
     'smartGrindToggle',
+    'temperaturePredictorEnabled',
   ];
 
   for (const [key, value] of Object.entries(formData)) {
@@ -144,6 +145,10 @@ function buildSubmitFormData(formData, autowakeupSchedules, restart) {
   formDataToSubmit.set(
     'altRelayFunction',
     formData.altRelayFunction !== undefined ? String(formData.altRelayFunction) : '1',
+  );
+  formDataToSubmit.set(
+    'dumpValveDuration',
+    formData.dumpValveDuration !== undefined ? String(formData.dumpValveDuration) : '2',
   );
   formDataToSubmit.set(
     'buttonBehavior',
@@ -175,7 +180,7 @@ export function Settings() {
   const apiService = useContext(ApiServiceContext);
   const { params } = useRoute();
   const tab = params.tab || 'general';
-  const isFormTab = ['general', 'machine', 'plugins'].includes(tab);
+  const isFormTab = ['general', 'machine', 'calibration', 'plugins'].includes(tab);
 
   const [profiles, setProfiles] = useState([]);
   const [submitting, setSubmitting] = useState(false);
@@ -262,6 +267,7 @@ export function Settings() {
           'delayAdjust',
           'clock24hFormat',
           'autowakeupEnabled',
+          'temperaturePredictorEnabled',
         ].includes(key)
       ) {
         value = !formData[key];
@@ -382,7 +388,7 @@ export function Settings() {
     { id: 'calibration', label: 'Calibration', icon: faCrosshairs, preload: loadCalibrationTab },
     { id: 'plugins', label: 'Plugins', icon: faPuzzlePiece, preload: loadPluginsTab },
     { id: 'bluetooth', label: 'Bluetooth', icon: faBluetoothB, preload: loadBluetoothTab },
-    { id: 'system', label: 'System', icon: faRotate, preload: loadSystemTab },
+    { id: 'system', label: 'System & Updates', icon: faRotate, preload: loadSystemTab },
   ];
 
   return (
@@ -477,6 +483,9 @@ export function Settings() {
           ) : (
             <LazyMachineTab formData={formData} onChange={onChange} setField={setField} />
           ))}
+        {tab === 'calibration' && (
+          <LazyCalibrationTab formData={formData} onChange={onChange} setField={setField} />
+        )}
         {tab === 'plugins' &&
           (isLoading ? (
             <PluginsTabSkeleton />
@@ -497,7 +506,6 @@ export function Settings() {
         )}
       </form>
 
-      {tab === 'calibration' && <LazyCalibrationTab formData={formData} onChange={onChange} />}
       {tab === 'bluetooth' && (isLoading ? <BluetoothTabSkeleton /> : <LazyBluetoothTab />)}
       {tab === 'system' && (isLoading ? <SystemTabSkeleton /> : <LazySystemTab />)}
     </PageLayout>

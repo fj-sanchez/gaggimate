@@ -6,15 +6,16 @@
 GaggiMateServer::GaggiMateServer() : _endpoint(_transport) {}
 
 void GaggiMateServer::init(const String &deviceName, const String &hardware, const String &version,
-                           const gm::DeviceCapabilities &capabilities) {
+                           const gm::DeviceCapabilities &capabilities, bool pairingWindow) {
     setSystemInfo(hardware, version, capabilities);
     registerHandlers();
     _endpoint.onConnection([this](bool connected) {
+        _sentSystemInfoAfterHandshake = false;
         if (connected)
             pushSystemInfo();
     });
     _endpoint.begin();
-    _transport.init(deviceName);
+    _transport.init(deviceName, pairingWindow);
 
     if (xTaskCreatePinnedToCore(pumpTask, "GaggiMateServer", 4096, this, 1, &_taskHandle, 0) != pdPASS) {
         _taskHandle = nullptr;
@@ -56,19 +57,26 @@ void GaggiMateServer::pushSystemInfo() {
     _endpoint.send(p);
 }
 
-gm::Payload GaggiMateServer::buildSensorData(float temperature, float pressure, float puckFlow, float pumpFlow,
-                                             float puckResistance, float pumpPower, float heaterPower) {
+gm::Payload GaggiMateServer::buildSensorData(float temperature, float controlTemperature, float predictorResidual,
+                                             bool predictorActive, uint8_t predictorFallback, float pressure, float puckFlow,
+                                             float pumpFlow, float puckResistance, float pumpPower, float heaterPower,
+                                             float waterPumped) {
     gm::Payload p = gaggimate_Payload_init_zero;
     p.which_content = gaggimate_Payload_sensor_tag;
     p.content.sensor.boilers_count = 1; // boiler 0; schema allows more
     p.content.sensor.boilers[0].index = 0;
     p.content.sensor.boilers[0].temperature = temperature;
+    p.content.sensor.boilers[0].control_temperature = controlTemperature;
+    p.content.sensor.boilers[0].predictor_residual = predictorResidual;
+    p.content.sensor.boilers[0].predictor_active = predictorActive;
+    p.content.sensor.boilers[0].predictor_fallback = predictorFallback;
     p.content.sensor.boilers[0].pressure = pressure;
+    p.content.sensor.boilers[0].power = heaterPower;
     p.content.sensor.puck_flow = puckFlow;
     p.content.sensor.pump_flow = pumpFlow;
     p.content.sensor.puck_resistance = puckResistance;
     p.content.sensor.pump_power = pumpPower;
-    p.content.sensor.heater_power = heaterPower;
+    p.content.sensor.water_pumped = waterPumped;
     return p;
 }
 
@@ -80,13 +88,17 @@ gm::Payload GaggiMateServer::buildButtonState(uint8_t index, bool pressed) {
     return p;
 }
 
-gm::Payload GaggiMateServer::buildAutotuneResult(float kp, float ki, float kd, float kf) {
+gm::Payload GaggiMateServer::buildAutotuneResult(float kp, float ki, float kd, float kf, float delay, float processGain,
+                                                 float lag) {
     gm::Payload p = gaggimate_Payload_init_zero;
     p.which_content = gaggimate_Payload_autotune_result_tag;
     p.content.autotune_result.kp = kp;
     p.content.autotune_result.ki = ki;
     p.content.autotune_result.kd = kd;
     p.content.autotune_result.kf = kf;
+    p.content.autotune_result.delay = delay;
+    p.content.autotune_result.process_gain = processGain;
+    p.content.autotune_result.lag = lag;
     return p;
 }
 
@@ -111,19 +123,19 @@ gm::Payload GaggiMateServer::buildError(int code) {
     return p;
 }
 
-// Telemetry (sensor / volumetric / ToF) is sent fire-and-forget: it is
-// high-rate and self-refreshing, so a dropped sample is replaced by the next
-// one. This avoids the constant ACK chatter on the high-rate path. Button /
-// autotune-result / error / system-info stay reliable.
-void GaggiMateServer::sendSensorData(float temperature, float pressure, float puckFlow, float pumpFlow, float puckResistance,
-                                     float pumpPower, float heaterPower) {
-    _endpoint.sendUnreliable(buildSensorData(temperature, pressure, puckFlow, pumpFlow, puckResistance, pumpPower, heaterPower));
+// Telemetry (sensor / volumetric / ToF) is fire-and-forget: self-refreshing, so skip ACK chatter; the rest stays reliable.
+void GaggiMateServer::sendSensorData(float temperature, float controlTemperature, float predictorResidual, bool predictorActive,
+                                     uint8_t predictorFallback, float pressure, float puckFlow, float pumpFlow,
+                                     float puckResistance, float pumpPower, float heaterPower) {
+    _endpoint.sendUnreliable(buildSensorData(temperature, controlTemperature, predictorResidual, predictorActive,
+                                             predictorFallback, pressure, puckFlow, pumpFlow, puckResistance, pumpPower,
+                                             heaterPower));
 }
 
 void GaggiMateServer::sendButtonState(uint8_t index, bool pressed) { _endpoint.send(buildButtonState(index, pressed)); }
 
-void GaggiMateServer::sendAutotuneResult(float kp, float ki, float kd, float kf) {
-    _endpoint.send(buildAutotuneResult(kp, ki, kd, kf));
+void GaggiMateServer::sendAutotuneResult(float kp, float ki, float kd, float kf, float delay, float processGain, float lag) {
+    _endpoint.send(buildAutotuneResult(kp, ki, kd, kf, delay, processGain, lag));
 }
 
 void GaggiMateServer::sendVolumetricMeasurement(float volume) { _endpoint.sendUnreliable(buildVolumetricMeasurement(volume)); }
@@ -134,6 +146,14 @@ void GaggiMateServer::sendError(int code) { _endpoint.send(buildError(code)); }
 
 void GaggiMateServer::registerHandlers() {
     _endpoint.on(gaggimate_Payload_ping_tag, [this](const gm::Payload &) {
+        // A SystemInfo notification sent synchronously from the BLE subscribe
+        // callback can beat the client's notification handler. Once a ping has
+        // crossed the framed protocol, the link is fully established; resend
+        // SystemInfo once so reliable delivery starts from a usable session.
+        if (!_sentSystemInfoAfterHandshake) {
+            _sentSystemInfoAfterHandshake = true;
+            pushSystemInfo();
+        }
         if (_pingCb)
             _pingCb();
     });
@@ -154,6 +174,11 @@ void GaggiMateServer::registerHandlers() {
     _endpoint.on(gaggimate_Payload_pid_tag, [this](const gm::Payload &p) {
         if (_pidCb)
             _pidCb(p.content.pid.kp, p.content.pid.ki, p.content.pid.kd, p.content.pid.kf);
+    });
+    _endpoint.on(gaggimate_Payload_thermal_model_tag, [this](const gm::Payload &p) {
+        if (_thermalModelCb)
+            _thermalModelCb(p.content.thermal_model.enabled, p.content.thermal_model.delay,
+                            p.content.thermal_model.process_gain, p.content.thermal_model.lag);
     });
     _endpoint.on(gaggimate_Payload_pump_model_tag, [this](const gm::Payload &p) {
         if (_pumpSettingsCb)

@@ -6,12 +6,12 @@
 #include <display/plugins/BLEScalePlugin.h>
 
 void action_on_wakeup(lv_event_t *e) {
-    if (controller.isUpdating() || controller.isErrorState() || controller.isAutotuning() ||
-        !controller.getClientController()->isConnected()) {
+    if (!controller.getClientController()->isConnected() || controller.getSystemInfo().protocolMismatch ||
+        !controller.isReady()) {
         return;
     }
     controller.getUI()->changeScreen(SCREEN_ID_BREW_SCREEN);
-    controller.deactivate();
+    controller.deactivate(true);
     controller.setMode(MODE_BREW);
 };
 
@@ -20,37 +20,41 @@ void action_on_load_started(lv_event_t *e) {
 };
 
 void action_on_menu_click(lv_event_t *e) {
-    controller.deactivate();
+    controller.deactivate(true);
+    controller.setMode(MODE_BREW);
     controller.getUI()->changeScreen(SCREEN_ID_MENU_SCREEN_NEW);
 };
 
 void action_on_brew_screen(lv_event_t *e) {
     controller.getUI()->changeScreen(SCREEN_ID_BREW_SCREEN);
-    controller.deactivate();
+    controller.deactivate(true);
     controller.setMode(MODE_BREW);
 };
 
 void action_on_steam_screen(lv_event_t *e) {
     controller.getUI()->changeScreen(SCREEN_ID_STEAM_SCREEN);
     controller.setMode(MODE_STEAM);
-    controller.deactivate();
+    controller.deactivate(true);
 };
 
 void action_on_water_screen(lv_event_t *e) {
     controller.getUI()->changeScreen(SCREEN_ID_WATER_SCREEN);
     controller.setMode(MODE_WATER);
-    controller.deactivate();
+    controller.deactivate(true);
 };
 
 void action_on_grind_screen(lv_event_t *e) {
     controller.getUI()->changeScreen(SCREEN_ID_GRIND_SCREEN);
     controller.setMode(MODE_GRIND);
-    controller.deactivate();
+    controller.deactivate(true);
 };
 
-void action_on_brew_start(lv_event_t *e) { controller.activate(); };
+void action_on_brew_start(lv_event_t *e) { controller.activate(); }; // SHORT_CLICKED in EEZ: never fires after a long press
 
-void action_on_flush(lv_event_t *e) { controller.onFlush(); };
+void action_on_flush(lv_event_t *e) {
+    controller.onFlush();
+    controller.getUI()->onTouchFlushStart();
+};
 
 void action_on_volumetric_hold(lv_event_t *e) {
     controller.getClientController()->tare();
@@ -220,7 +224,9 @@ void action_on_next_profile(lv_event_t *e) { controller.getUI()->onNextProfile()
 
 void action_on_brew_cancel(lv_event_t *e) {
     controller.deactivate();
-    controller.clear();
+    if (!controller.isActive()) {
+        controller.clear();
+    }
 }
 
 void action_on_standby(lv_event_t *e) { controller.activateStandby(); }
@@ -261,7 +267,7 @@ void action_on_screen_load(lv_event_t *e) {
     applyClickArea(objects.btn_grind_1, 15);
     applyClickArea(objects.btn_settings_1, 15);
     applyClickArea(objects.info_btn, 15);
-    applyClickArea(objects.menu_dials__standby_icon, 20);
+    applyClickArea(objects.new_menu_dials__standby_icon, 20);
     applyClickArea(objects.standby_btn, 20);
     applyClickArea(objects.brew_dials__menu_icon, 20);
     applyClickArea(objects.status_dials__menu_icon, 20);
@@ -316,3 +322,10 @@ void action_on_screen_swipe(lv_event_t *e) {
 }
 
 void action_on_info_screen(lv_event_t *e) { controller.getUI()->changeScreen(SCREEN_ID_INFO_SCREEN); }
+
+void action_on_warning_back(lv_event_t *e) { controller.cancelBrewConfirm(); }
+
+void action_on_warning_ignore(lv_event_t *e) {
+    controller.getUI()->setBrewConfirmVisible(false);
+    controller.activate(true);
+}
