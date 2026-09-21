@@ -47,15 +47,6 @@ class BleServerTransport : public Transport, public NimBLEServerCallbacks, publi
     String _deviceName;
     BLE_OTA_DFU _otaDfu;
 
-    static constexpr size_t TX_QUEUE_DEPTH = 8;
-    static constexpr size_t TX_BUFFER_SIZE = 256;
-    struct TxPacket {
-      uint16_t length;
-      uint8_t data[TX_BUFFER_SIZE];
-    };
-    QueueHandle_t _txQueue = nullptr;
-    TaskHandle_t _txTask = nullptr;
-
     void enableWhitelist();
     void applyAdvertisingData();
     void startAdv(); // directed at the paired display, or open when unpaired
@@ -64,8 +55,6 @@ class BleServerTransport : public Transport, public NimBLEServerCallbacks, publi
     void pruneForeignBonds(const NimBLEAddress &keep);
     void loadPairedPeer();
     void savePairedPeer(const NimBLEAddress &address);
-    static void txTaskFn(void *arg);
-    void txTaskLoop();
 
     void onConnect(NimBLEServer *server) override;
     void onConnect(NimBLEServer *server, ble_gap_conn_desc *desc) override;
