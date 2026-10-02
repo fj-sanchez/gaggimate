@@ -1,10 +1,19 @@
 import { useState, useEffect, useCallback, useContext } from 'preact/hooks';
-import { ApiServiceContext } from '../../../services/ApiService.js';
+import { ApiServiceContext, machine } from '../../../services/ApiService.js';
 import { OverviewChart } from '../../../components/OverviewChart.jsx';
 import { Spinner } from '../../../components/Spinner.jsx';
 import Section from '../../../components/Card.jsx';
 import PumpFlowCalibration from '../../../components/PumpFlowCalibration/index.jsx';
 import { SettingsFormField } from '../../../components/SettingsFormField.jsx';
+
+const PREDICTOR_STATE_LABELS = [
+  'healthy',
+  'disabled',
+  'invalid model',
+  'invalid input',
+  'model mismatch',
+  'prediction bounded',
+];
 
 export function CalibrationTab({ formData, onChange, setField }) {
   const apiService = useContext(ApiServiceContext);
@@ -12,6 +21,7 @@ export function CalibrationTab({ formData, onChange, setField }) {
   // Autotune state
   const [autotuneActive, setAutotuneActive] = useState(false);
   const [autotuneResult, setAutotuneResult] = useState(null);
+  const [autotuneFeedforwardSkipped, setAutotuneFeedforwardSkipped] = useState(false);
   const [autotuneFailed, setAutotuneFailed] = useState(false);
   const [autotuneTime, setAutotuneTime] = useState(120);
   const [autotuneSamples, setAutotuneSamples] = useState(6);
@@ -26,6 +36,7 @@ export function CalibrationTab({ formData, onChange, setField }) {
     });
     setAutotuneFailed(false);
     setAutotuneResult(null);
+    setAutotuneFeedforwardSkipped(false);
     setAutotuneActive(true);
   }, [autotuneTime, autotuneSamples, autotuneWattage, apiService]);
 
@@ -34,6 +45,17 @@ export function CalibrationTab({ formData, onChange, setField }) {
       setAutotuneActive(false);
       setAutotuneFailed(false);
       setAutotuneResult(msg.pid);
+      setAutotuneFeedforwardSkipped(!!msg.kfSkipped);
+      if (msg.pid) {
+        const pidParts = msg.pid.split(',');
+        setField?.('pid', pidParts.slice(0, 3).join(','));
+        setField?.('kf', pidParts.length >= 4 ? pidParts[3] : '');
+      }
+      if (msg.model) {
+        setField?.('thermalModelDelay', msg.model.delay);
+        setField?.('thermalModelGain', msg.model.gain);
+        setField?.('thermalModelLag', msg.model.lag);
+      }
     });
     const failedListener = apiService.on('evt:autotune-failed', () => {
       setAutotuneActive(false);
@@ -44,7 +66,24 @@ export function CalibrationTab({ formData, onChange, setField }) {
       apiService.off('evt:autotune-result', resultListener);
       apiService.off('evt:autotune-failed', failedListener);
     };
-  }, [apiService]);
+  }, [apiService, setField]);
+
+  const modelDelay = Number(formData.thermalModelDelay);
+  const modelGain = Number(formData.thermalModelGain);
+  const modelLag = Number(formData.thermalModelLag);
+  const modelReady =
+    Number.isFinite(modelDelay) &&
+    modelDelay >= 0.25 &&
+    modelDelay <= 240 &&
+    Number.isFinite(modelGain) &&
+    modelGain >= 0.0001 &&
+    modelGain <= 5 &&
+    Number.isFinite(modelLag) &&
+    modelLag >= 0.05 &&
+    modelLag <= 240;
+  const predictorStatus = machine.value.status;
+  const predictorReason =
+    PREDICTOR_STATE_LABELS[predictorStatus.predictorFallbackReason] ?? 'unknown';
 
   return (
     <div className='space-y-4 sm:space-y-6 lg:grid lg:grid-cols-2 lg:gap-4'>
@@ -84,6 +123,11 @@ export function CalibrationTab({ formData, onChange, setField }) {
                 <code>{autotuneResult}</code>
               </pre>
             </div>
+            <p className='text-sm'>
+              {autotuneFeedforwardSkipped
+                ? 'Thermal feedforward unchanged (no heater wattage supplied).'
+                : `Thermal feedforward Kff ${autotuneResult.split(',')[3] ?? ''}`}
+            </p>
             <button
               type='button'
               className='btn btn-outline btn-sm mt-2'
@@ -169,7 +213,7 @@ export function CalibrationTab({ formData, onChange, setField }) {
                   id='heaterWattage'
                   type='number'
                   min='300'
-                  max='1500'
+                  max='2500'
                   className='input input-bordered w-full'
                   value={autotuneWattage}
                   onChange={e => setAutotuneWattage(Number.parseInt(e.target.value, 10) || 0)}
@@ -189,7 +233,7 @@ export function CalibrationTab({ formData, onChange, setField }) {
                   autotuneSamples < 4 ||
                   autotuneSamples > 20 ||
                   autotuneWattage < 300 ||
-                  autotuneWattage > 1500
+                  autotuneWattage > 2500
                 }
               >
                 Start Autotune
@@ -205,6 +249,62 @@ export function CalibrationTab({ formData, onChange, setField }) {
           currentCoeffs={formData.pumpModelCoeffs}
           onApplied={coeffs => setField('pumpModelCoeffs', coeffs)}
         />
+      </Section>
+
+      <Section title='Predictive Temperature Control' className='h-full'>
+        <div className='space-y-4'>
+          <div className='form-control'>
+            <label className={`label cursor-pointer justify-start gap-3 ${modelReady ? '' : 'opacity-60'}`}>
+              <input
+                type='checkbox'
+                className='toggle toggle-primary'
+                checked={!!formData.temperaturePredictorEnabled}
+                onChange={onChange('temperaturePredictorEnabled')}
+                disabled={!modelReady}
+              />
+              <span className='label-text'>Use delayed-temperature prediction</span>
+            </label>
+            <p className='text-base-content/70 text-sm'>
+              Opt in after a successful autotune. Raw thermocouple limits and shutdowns remain active.
+            </p>
+          </div>
+
+          {modelReady ? (
+            <div className='grid grid-cols-1 gap-3 sm:grid-cols-3'>
+              <div>
+                <div className='text-base-content/60 text-xs uppercase'>Delay L</div>
+                <div className='font-mono'>{Number(formData.thermalModelDelay).toFixed(2)} s</div>
+              </div>
+              <div>
+                <div className='text-base-content/60 text-xs uppercase'>Gain k′</div>
+                <div className='font-mono'>{Number(formData.thermalModelGain).toFixed(4)} °C/s</div>
+              </div>
+              <div>
+                <div className='text-base-content/60 text-xs uppercase'>Sensor lag τ₂</div>
+                <div className='font-mono'>{Number(formData.thermalModelLag).toFixed(2)} s</div>
+              </div>
+            </div>
+          ) : (
+            <div className='alert alert-info'>
+              <span>Run PID Autotune once to identify the thermal model.</span>
+            </div>
+          )}
+
+          <div className='text-sm'>
+            Runtime state:{' '}
+            <span className='font-medium'>
+              {predictorStatus.temperaturePredictorActive
+                ? `active · ${predictorReason}`
+                : `bypassed · ${predictorReason}`}
+            </span>
+            {Number.isFinite(predictorStatus.predictorResidual) && (
+              <span className='text-base-content/70'>
+                {' '}
+                · residual {predictorStatus.predictorResidual.toFixed(2)} °C
+              </span>
+            )}
+          </div>
+        </div>
       </Section>
     </div>
   );

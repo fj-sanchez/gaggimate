@@ -51,7 +51,9 @@ void WebSocketHandler::setup(Controller *_controller, PluginManager *_pluginMana
     this->pluginManager = _pluginManager;
     this->profileManager = _controller->getProfileManager();
 
-    pluginManager->on("controller:autotune:result", [this](Event const &event) { sendAutotuneResult(); });
+    pluginManager->on("controller:autotune:result", [this](Event const &event) {
+        sendAutotuneResult(event.getInt("kfSkipped") != 0);
+    });
     pluginManager->on("controller:autotune:failed", [this](Event const &) { sendAutotuneFailed(); });
 
     // A brew start blocked by an error-level warning asks every dashboard for confirmation.
@@ -192,7 +194,8 @@ void WebSocketHandler::handleWebSocketData(AsyncWebSocket *server, AsyncWebSocke
                     controller->cancelBrewConfirm();
                 } else if (msgType == "req:process:deactivate") {
                     controller->deactivate();
-                    controller->clear();
+                    if (!controller->isActive())
+                        controller->clear();
                 } else if (msgType == "req:process:clear") {
                     controller->clear();
                 } else if (msgType == "req:grind:activate") {
@@ -220,7 +223,7 @@ void WebSocketHandler::handleWebSocketData(AsyncWebSocket *server, AsyncWebSocke
                     // Locked in standby while the controller is not ready, like the touch UI's wake gate.
                     if (doc["mode"].is<uint8_t>() && controller->getSystemState() == SYSTEM_READY) {
                         auto mode = doc["mode"].as<uint8_t>();
-                        controller->deactivate();
+                        controller->deactivate(true);
                         controller->clear();
                         controller->setMode(mode);
                     }
@@ -401,6 +404,10 @@ void WebSocketHandler::publishTelemetry() {
     statusDoc["cst"] = round_to(controller->getCurrentSteamTemp(), 3);
     statusDoc["tst"] = controller->getTargetSteamTemp();
     statusDoc["db"] = controller->getSystemInfo().capabilities.dualBoiler;
+    statusDoc["ect"] = round_to(controller->getControlTemperature(), 3);
+    statusDoc["tpr"] = round_to(controller->getPredictorResidual(), 3);
+    statusDoc["tpa"] = controller->isTemperaturePredictorActive();
+    statusDoc["tpf"] = controller->getPredictorFallbackReason();
     statusDoc["tt"] = controller->getTargetTemp();
     statusDoc["pr"] = round_to(controller->getCurrentPressure(), 3);
     statusDoc["fl"] = round_to(controller->getCurrentPumpFlow(), 3);
@@ -488,10 +495,16 @@ void WebSocketHandler::broadcastJson(JsonDocument &doc) {
     ws.textAll(toWsBuffer(doc));
 }
 
-void WebSocketHandler::sendAutotuneResult() {
+void WebSocketHandler::sendAutotuneResult(bool feedforwardSkipped) {
     JsonDocument doc(&psramAllocator);
     doc["tp"] = "evt:autotune-result";
-    doc["pid"] = controller->getSettings().getPid();
+    const Settings &settings = controller->getSettings();
+    doc["pid"] = settings.getPid();
+    doc["kfSkipped"] = feedforwardSkipped;
+    JsonObject model = doc["model"].to<JsonObject>();
+    model["delay"] = settings.getThermalModelDelay();
+    model["gain"] = settings.getThermalModelGain();
+    model["lag"] = settings.getThermalModelLag();
     broadcastJson(doc);
 }
 

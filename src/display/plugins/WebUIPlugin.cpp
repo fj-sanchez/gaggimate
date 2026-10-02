@@ -175,6 +175,10 @@ void WebUIPlugin::setupServer() {
         doc["mode"] = controller->getMode();
         doc["tt"] = controller->getTargetTemp();
         doc["ct"] = controller->getCurrentTemp();
+        doc["ect"] = controller->getControlTemperature();
+        doc["tpr"] = controller->getPredictorResidual();
+        doc["tpa"] = controller->isTemperaturePredictorActive();
+        doc["tpf"] = controller->getPredictorFallbackReason();
         serializeJson(doc, *response);
         request->send(response);
     });
@@ -316,6 +320,13 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
                 settings->setPressureScaling(request->arg("pressureScaling").toFloat());
             if (request->hasArg("pid"))
                 settings->setPid(request->arg("pid"));
+            if (request->hasArg("thermalModelDelay") && request->hasArg("thermalModelGain") &&
+                request->hasArg("thermalModelLag")) {
+                settings->setThermalModel(request->arg("thermalModelDelay").toFloat(),
+                                          request->arg("thermalModelGain").toFloat(),
+                                          request->arg("thermalModelLag").toFloat());
+            }
+            settings->setTemperaturePredictorEnabled(request->hasArg("temperaturePredictorEnabled"));
             if (request->hasArg("pumpModelCoeffs"))
                 settings->setPumpModelCoeffs(request->arg("pumpModelCoeffs"));
             if (request->hasArg("pumpSlipCoeffs"))
@@ -410,6 +421,8 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
                 settings->setFullTankDistance(request->arg("fullTankDistance").toInt());
             if (request->hasArg("altRelayFunction"))
                 settings->setAltRelayFunction(request->arg("altRelayFunction").toInt());
+            if (request->hasArg("dumpValveDuration"))
+                settings->setDumpValveDuration(request->arg("dumpValveDuration").toFloat());
             if (request->hasArg("buttonBehavior"))
                 settings->setButtonBehaviorList(explode(request->arg("buttonBehavior"), ','));
             if (request->hasArg("commutationGain"))
@@ -470,6 +483,8 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
         });
         pluginManager->trigger("settings:changed");
         controller->setTargetTemp(controller->getTargetTemp());
+        controller->setPidSettings();
+        controller->setThermalModelSettings();
         controller->setPumpModelCoeffs();
     }
 
@@ -488,6 +503,10 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
     doc["haPort"] = settings.getHomeAssistantPort();
     doc["haTopic"] = settings.getHomeAssistantTopic();
     doc["pid"] = settings.getPid();
+    doc["temperaturePredictorEnabled"] = settings.isTemperaturePredictorEnabled();
+    doc["thermalModelDelay"] = settings.getThermalModelDelay();
+    doc["thermalModelGain"] = settings.getThermalModelGain();
+    doc["thermalModelLag"] = settings.getThermalModelLag();
     doc["pumpModelCoeffs"] = settings.getPumpModelCoeffs();
     doc["pumpSlipCoeffs"] = settings.getPumpSlipCoeffs();
     doc["wifiSsid"] = settings.getWifiSsid();
@@ -531,6 +550,7 @@ void WebUIPlugin::handleSettings(AsyncWebServerRequest *request) const {
     doc["emptyTankDistance"] = settings.getEmptyTankDistance();
     doc["fullTankDistance"] = settings.getFullTankDistance();
     doc["altRelayFunction"] = settings.getAltRelayFunction();
+    doc["dumpValveDuration"] = settings.getDumpValveDuration();
     // Add auto-wakeup settings to response
     doc["autowakeupEnabled"] = settings.isAutoWakeupEnabled();
     doc["buttonBehavior"] = implode(settings.getButtonBehaviorList(), ",");

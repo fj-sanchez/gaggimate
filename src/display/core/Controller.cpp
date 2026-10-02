@@ -9,6 +9,7 @@
 #include <ctime>
 #include <display/config.h>
 #include <display/core/constants.h>
+#include <display/core/pid_feedforward.h>
 #include <display/core/process/BrewProcess.h>
 #include <display/core/process/GrindProcess.h>
 #include <display/core/process/PumpProcess.h>
@@ -43,6 +44,15 @@
 #endif
 
 const String LOG_TAG = F("Controller");
+
+namespace {
+float brewDumpDurationS(const Settings &settings) {
+    if (settings.getAltRelayFunction() != ALT_RELAY_DUMP) {
+        return 0.0f;
+    }
+    return settings.getDumpValveDuration();
+}
+} // namespace
 
 void Controller::setup() {
     mode = MODE_STANDBY;
@@ -251,9 +261,14 @@ void Controller::setupBluetooth() {
         }
     });
     pluginManager->on("ota:update:end", [this](Event const &) { applyConnectionPriority(true); });
-    comms.onSensorData([this](float temp, float temp2, float pressure, float puckFlow, float pumpFlow, float puckResistance,
+    comms.onSensorData([this](float temp, float temp2, float controlTemp, float modelResidual, bool predictorActive,
+                              uint8_t predictorFallback, float pressure, float puckFlow, float pumpFlow, float puckResistance,
                               float pumpPower, float heaterPower, float waterPumped) {
         onTempRead(temp);
+        this->controlTemperature = controlTemp - static_cast<float>(settings.getTemperatureOffset());
+        this->predictorResidual = modelResidual;
+        this->temperaturePredictorActive = predictorActive;
+        this->predictorFallbackReason = predictorFallback;
         onPressureRead(pressure);
         this->currentSteamTemp = temp2;
         this->currentPuckFlow = puckFlow;
@@ -289,28 +304,35 @@ void Controller::setupBluetooth() {
         }
         if (error != ERROR_CODE_TIMEOUT && error != this->error) {
             this->error = error;
-            deactivate();
+            deactivate(true);
             setMode(MODE_STANDBY);
             pluginManager->trigger(F("controller:error"));
             ESP_LOGE(LOG_TAG, "Received error %d", error);
         }
     });
-    comms.onAutotuneResult([this](float Kp, float Ki, float Kd, float Kf) {
-        ESP_LOGI(LOG_TAG, "Received autotune values: Kp=%.3f, Ki=%.3f, Kd=%.3f, Kf=%.3f (combined)", Kp, Ki, Kd, Kf);
+    comms.onAutotuneResult([this](float Kp, float Ki, float Kd, float Kf, float delay, float processGain, float lag) {
+        ESP_LOGI(LOG_TAG,
+                 "Received autotune values: Kp=%.3f, Ki=%.3f, Kd=%.3f, Kf=%.3f, L=%.2f, k'=%.4f, tau2=%.2f", Kp, Ki, Kd,
+                 Kf, delay, processGain, lag);
         // Guard: older controller firmware could emit zero/NaN gains (#672
         // class). Reject — keep existing PID, surface as "Autotune Failed".
-        if (!std::isfinite(Kp) || !std::isfinite(Ki) || !std::isfinite(Kd) || !std::isfinite(Kf) || Kp <= 0.0f ||
-            (Kp + Ki + Kd) <= 0.0f) {
+        if (!std::isfinite(Kp) || !std::isfinite(Ki) || !std::isfinite(Kd) || !std::isfinite(Kf) ||
+            !std::isfinite(delay) || !std::isfinite(processGain) || !std::isfinite(lag) || Kp <= 0.0f ||
+            (Kp + Ki + Kd) <= 0.0f || delay <= 0.0f || processGain <= 0.0f || lag <= 0.0f) {
             ESP_LOGW(LOG_TAG, "Rejecting autotune result: invalid gains, preserving existing PID");
             autotuning = false;
             pluginManager->trigger("controller:autotune:failed");
             return;
         }
-        char pid[64];
-        // Store in simplified format with combined Kf
-        snprintf(pid, sizeof(pid), "%.3f,%.3f,%.3f,%.3f", Kp, Ki, Kd, Kf);
-        settings.setPid(String(pid));
-        pluginManager->trigger("controller:autotune:result");
+        // Kf == 0 means wattage was not supplied. formatAutotunePid omits the 4th
+        // field so setPid keeps the stored feedforward instead of writing 0.
+        bool feedforwardSkipped = false;
+        settings.setPid(String(formatAutotunePid(Kp, Ki, Kd, Kf, feedforwardSkipped).c_str()));
+        settings.setThermalModel(delay, processGain, lag);
+        settings.save(true);
+        setThermalModelSettings();
+        setPidSettings();
+        pluginManager->trigger("controller:autotune:result", "kfSkipped", feedforwardSkipped ? 1 : 0);
         autotuning = false;
     });
     comms.onVolumetricMeasurement(
@@ -348,6 +370,7 @@ void Controller::onSystemInfo(const char *hardware, const char *version, uint32_
     } else {
         setPressureScale();
         setPidSettings();
+        setThermalModelSettings();
         setPumpModelCoeffs();
         configResendUntil = millis() + CONFIG_RESEND_WINDOW_MS;
         lastConfigResend = millis();
@@ -529,6 +552,7 @@ void Controller::loop() {
     if (comms.isConnected() && now < configResendUntil && (now - lastConfigResend) >= CONFIG_RESEND_INTERVAL_MS) {
         setPressureScale();
         setPidSettings();
+        setThermalModelSettings();
         setPumpModelCoeffs();
         lastConfigResend = now;
     }
@@ -833,6 +857,11 @@ void Controller::setPidSettings() {
     comms.sendPidSettings(pid[0], pid[1], pid[2], pid[3]);
 }
 
+void Controller::setThermalModelSettings() {
+    comms.sendThermalModelSettings(settings.isTemperaturePredictorEnabled(), settings.getThermalModelDelay(),
+                                   settings.getThermalModelGain(), settings.getThermalModelLag());
+}
+
 int Controller::getTargetGrindDuration() const { return settings.getTargetGrindDuration(); }
 
 void Controller::setTargetGrindDuration(int duration) {
@@ -942,7 +971,10 @@ void Controller::updateControl() {
 
     bool altRelayActive = false;
     if (active && proc->isAltRelayActive()) {
-        if (proc->getType() == MODE_GRIND && settings.getAltRelayFunction() == ALT_RELAY_GRIND) {
+        const int fn = settings.getAltRelayFunction();
+        if (fn == ALT_RELAY_GRIND && proc->getType() == MODE_GRIND) {
+            altRelayActive = true;
+        } else if (fn == ALT_RELAY_DUMP && proc->getType() == MODE_BREW) {
             altRelayActive = true;
         }
     }
@@ -1085,7 +1117,7 @@ void Controller::activate(bool ignoreWarnings) {
                                      profileManager->getSelectedProfile().isVolumetric() && isVolumetricAvailable()
                                          ? ProcessTarget::VOLUMETRIC
                                          : ProcessTarget::TIME,
-                                     settings.getBrewDelay()));
+                                     settings.getBrewDelay(), brewDumpDurationS(settings)));
         break;
     case MODE_STEAM:
         startProcess(new SteamProcess(STEAM_SAFETY_DURATION_MS, settings.getSteamPumpPercentage()));
@@ -1108,10 +1140,18 @@ void Controller::activate(bool ignoreWarnings) {
 // A UI declined the brew confirmation; every UI showing it dismisses.
 void Controller::cancelBrewConfirm() { pluginManager->trigger("controller:brew:confirm:cancel"); }
 
-void Controller::deactivate() {
+void Controller::deactivate(bool force) {
     std::vector<const char *> events;
     {
         std::lock_guard<std::recursive_mutex> guard(processMutex);
+        if (!force && !isErrorState() && currentProcess != nullptr && currentProcess->isActive() &&
+            currentProcess->getType() == MODE_BREW) {
+            auto *brewProcess = static_cast<BrewProcess *>(currentProcess);
+            if (brewProcess->processPhase == ProcessPhase::RUNNING && brewProcess->hasDump()) {
+                brewProcess->startDump(PhaseExitReason::ABORTED);
+                return;
+            }
+        }
         deactivateLocked(events);
     }
     if (!events.empty())
@@ -1301,7 +1341,7 @@ void Controller::onFlush() {
     const int duration = settings.getFlushDuration();
     Profile profile = FLUSH_PROFILE;
     profile.phases[0].duration = duration > 0 ? duration : FLUSH_HOLD_MAX_DURATION_S; // 0 = hold, capped
-    auto *flush = new BrewProcess(profile, ProcessTarget::TIME, settings.getBrewDelay());
+    auto *flush = new BrewProcess(profile, ProcessTarget::TIME, settings.getBrewDelay(), brewDumpDurationS(settings));
     flush->holdPhase = duration == 0; // pump phase ends on onFlushRelease(), the drain phase still runs
     std::vector<const char *> events;
     {
@@ -1399,7 +1439,9 @@ void Controller::handleBrewButton(bool pressed) {
     if (!pressed) { // latching switch flipped off
         if (getMode() == MODE_BREW) {
             deactivate();
-            clear();
+            if (!isActive()) {
+                clear();
+            }
         } else if (getMode() == MODE_WATER) {
             deactivate();
         }
@@ -1414,7 +1456,9 @@ void Controller::handleBrewButton(bool pressed) {
             activate();
         } else if (settings.isMomentaryButtons()) { // second press stops the shot
             deactivate();
-            clear();
+            if (!isActive()) {
+                clear();
+            }
         }
         break;
     case MODE_WATER:
@@ -1501,7 +1545,9 @@ void Controller::handleFlushButton(bool pressed) {
 void Controller::handleProfileButton(bool pressed, const String &id) {
     if (!pressed) { // latching switch flipped off
         deactivate();
-        clear();
+        if (!isActive()) {
+            clear();
+        }
         return;
     }
     if (getMode() == MODE_STANDBY) {
@@ -1513,7 +1559,9 @@ void Controller::handleProfileButton(bool pressed, const String &id) {
     }
     if (isActive()) { // pressing again stops the running shot
         deactivate();
-        clear();
+        if (!isActive()) {
+            clear();
+        }
         return;
     }
     std::vector<String> profileIds = profileManager->listProfiles();

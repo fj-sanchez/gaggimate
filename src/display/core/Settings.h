@@ -87,6 +87,10 @@ class Settings {
     double getGrindDelay() const { return grindDelay.get(); }
     bool isDelayAdjust() const { return delayAdjust.get(); }
     String getPid() const { return pid.get(); }
+    bool isTemperaturePredictorEnabled() const { return temperaturePredictorEnabled.get(); }
+    float getThermalModelDelay() const { return thermalModelDelay.get(); }
+    float getThermalModelGain() const { return thermalModelGain.get(); }
+    float getThermalModelLag() const { return thermalModelLag.get(); }
     String getPumpModelCoeffs() const { return pumpModelCoeffs.get(); }
     String getPumpSlipCoeffs() const { return pumpSlipCoeffs.get(); }
     String getWifiSsid() const { return wifiSsid.get(); }
@@ -156,6 +160,7 @@ class Settings {
     int getEmptyTankDistance() const { return emptyTankDistance.get(); }
     int getFullTankDistance() const { return fullTankDistance.get(); }
     int getAltRelayFunction() const { return altRelayFunction.get(); }
+    float getDumpValveDuration() const { return dumpValveDuration.get(); }
     bool isAutoWakeupEnabled() const { return autowakeupEnabled.get(); }
     std::vector<AutoWakeupSchedule> getAutoWakeupSchedules() const { return autowakeupSchedules.get(); }
     String getButtonBehavior(int index) const {
@@ -182,6 +187,8 @@ class Settings {
     void setGrindDelay(double grindDelay);
     void setDelayAdjust(bool delay_adjust);
     void setPid(const String &pid);
+    void setTemperaturePredictorEnabled(bool enabled);
+    void setThermalModel(float delay, float gain, float lag);
     void setPumpModelCoeffs(const String &pumpModelCoeffs);
     void setPumpSlipCoeffs(const String &pumpSlipCoeffs);
     void setWifiSsid(const String &wifiSsid);
@@ -244,6 +251,7 @@ class Settings {
     void setEmptyTankDistance(int empty_tank_distance);
     void setFullTankDistance(int full_tank_distance);
     void setAltRelayFunction(int alt_relay_function);
+    void setDumpValveDuration(float dump_valve_duration);
     void setAutoWakeupEnabled(bool enabled);
     void setAutoWakeupSchedules(const std::vector<AutoWakeupSchedule> &schedules);
     void setButtonBehavior(int index, String behavior);
@@ -275,6 +283,10 @@ class Settings {
     Property<std::vector<AutoWakeupSchedule>> autowakeupSchedules{registry, "ab_schedules", {AutoWakeupSchedule("07:00")}};
     Property<int> standbyTimeout{registry, "sbt", DEFAULT_STANDBY_TIMEOUT_MS};
     Property<String> pid{registry, "pid", DEFAULT_PID};
+    Property<bool> temperaturePredictorEnabled{registry, "tp_en", false};
+    Property<float> thermalModelDelay{registry, "tm_d", 0.0f};
+    Property<float> thermalModelGain{registry, "tm_g", 0.0f};
+    Property<float> thermalModelLag{registry, "tm_l", 0.0f};
     Property<String> wifiSsid{registry, "ws", ""};
     Property<String> wifiPassword{registry, "wp", ""};
     Property<String> wifiApPassword{registry, "wap", ""}; // empty until generated on first start
@@ -335,6 +347,7 @@ class Settings {
     Property<int> fullTankDistance{registry, "sr_fd", 30};
 
     Property<int> altRelayFunction{registry, "alt_relay", ALT_RELAY_GRIND}; // Default to grind
+    Property<float> dumpValveDuration{registry, "dv_dur", DEFAULT_DUMP_VALVE_DURATION_S};
     Property<std::vector<String>> buttonBehavior{registry, "btnb", {"brew", "steam", "water"}};
 
     // Pump settings
